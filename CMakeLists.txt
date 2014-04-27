@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(icreate_pathfinder)
+project(turtlebot_program)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -77,7 +77,7 @@ find_package(catkin REQUIRED COMPONENTS roscpp tf geometry_msgs laser_geometry)
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES icreate_pathfinder
+#  LIBRARIES turtlebot_program
 #  CATKIN_DEPENDS other_catkin_pkg
 #  DEPENDS system_lib
 )
@@ -93,22 +93,22 @@ include_directories(include)
 include_directories( /usr/include/eigen3 )
 
 ## Declare a cpp library
-# add_library(icreate_pathfinder
-#   src/${PROJECT_NAME}/icreate_pathfinder.cpp
+# add_library(turtlebot_program
+#   src/${PROJECT_NAME}/turtlebot_program.cpp
 # )
 
 ## Declare a cpp executable
-add_executable(icreate_pathfinder src/icreate_pathfinder.cpp)
+add_executable(turtlebot_program src/turtlebot_program.cpp)
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
-# add_dependencies(icreate_pathfinder_node icreate_pathfinder_generate_messages_cpp)
+# add_dependencies(turtlebot_program_node turtlebot_program_generate_messages_cpp)
 
 ## Specify libraries to link a library or executable target against
-target_link_libraries(icreate_pathfinder
+target_link_libraries(turtlebot_program
   ${catkin_LIBRARIES}
 )
-# target_link_libraries(icreate_pathfinder laser_geometry)
+# target_link_libraries(turtlebot_program laser_geometry)
 
 #############
 ## Install ##
@@ -125,7 +125,7 @@ target_link_libraries(icreate_pathfinder
 # )
 
 ## Mark executables and/or libraries for installation
-# install(TARGETS icreate_pathfinder icreate_pathfinder_node
+# install(TARGETS turtlebot_program turtlebot_program_node
 #   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 #   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 #   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
@@ -150,7 +150,7 @@ target_link_libraries(icreate_pathfinder
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_icreate_pathfinder.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_turtlebot_program.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()
