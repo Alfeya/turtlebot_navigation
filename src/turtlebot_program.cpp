@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cmath>
 #include <vector>
+#include <deque>
 #include <set>
 #include <boost/bind.hpp>
 
@@ -14,6 +15,9 @@
 #include <nav_msgs/OccupancyGrid.h>
 
 #define MIN_DIST 10.0
+#define WALL -2
+#define FREE_SPACE -1
+#define UNREACHABLE -3
 
 struct Pos
 {
@@ -130,10 +134,13 @@ private:
 
 	std::vector< WorldObject > objects;
 
-	std::set< Pos, PosComp > posCache;
+	std::vector< std::vector< int > > posCache;
 	
 	std::vector< Pos > pathPlan;
 
+	int height;
+
+	int width;
 public:
 
 	//! ROS node initialization
@@ -147,34 +154,180 @@ public:
 		map_sub_ = nh_.subscribe("/map", 1, &RobotDriver::mapCallback, this );
 	}
 
+	bool CheckWalkBounds(int y, int x)
+	{
+			return ( x >= 0 && x < width && y >= 0 && y < height );
+	}
+
+	// const Pos& robot_pos, const Pos& target_pos
+	bool FindPath(const Pos& robot_pos, const Pos& target_pos, std::deque< Pos >& path)
+	{
+		int x_src = robot_pos.x;
+		int y_src = robot_pos.y;
+		int x_dst = target_pos.x;
+		int y_dst = target_pos.y;
+
+		// the incoming and outcoming vector should be empty
+		if (!path.empty())
+			return false;
+
+		int** field = new int*[height];
+		for( int i = 0; i < height; ++i )
+			field[i] = new int[width];
+
+		for( int y = 0; y < height; y++ )
+		{
+			for( int x = 0; x < width; x++ )
+			{
+				field[y][x] = ( posCache[y][x] <= 0 ) ? FREE_SPACE : WALL;
+			}
+		}
+
+		// второй цикл для составления непроходимых участков учитывая размеры робота
+		for( int y = 0; y < height; y++ )
+		{
+			for( int x = 0; x < width; x++ )
+			{
+				if( field[y][x] == WALL )
+				{
+					for( int ty = -MIN_DIST; ty < MIN_DIST; ++ty )
+					{
+						for( int tx = -MIN_DIST; tx < MIN_DIST; ++tx )
+						{
+							if (CheckWalkBounds(y + ty, x + tx) == false)
+								continue;
+							
+							if( field[y + ty][x + tx] != WALL )
+								field[y + ty][x + tx] = UNREACHABLE;
+						}
+					}
+				}
+			}
+		}
+
+		// пометить точку назначения что до нее можно добраться
+		for( int ty = -MIN_DIST / 2; ty < MIN_DIST / 2; ++ty )
+		{
+			for( int tx = -MIN_DIST / 2; tx < MIN_DIST / 2; ++tx )
+			{
+				if (CheckWalkBounds(y_dst + ty, x_dst + tx) == false)
+					continue;
+
+				if( field[y_dst + ty][x_dst + tx] == UNREACHABLE )
+					field[y_dst + ty][x_dst + tx] = FREE_SPACE;
+			}
+		}
+
+		int dx[8] = {1, 0, -1, 0, 1, 1, -1, -1};   // смещения, соответствующие соседям ячейки
+		int dy[8] = {0, 1, 0, -1, 1, -1, 1, -1};   // справа, снизу, слева и сверху
+
+		field[y_src][x_src] = 0;
+		bool stop = false;
+		int d = 0;
+
+		while(!stop && field[y_dst][x_dst] == FREE_SPACE)
+		{
+			stop = true;                              // предполагаем, что все свободные клетки уже помечены
+			for ( int y = 0; y < height; y++ )
+			{
+				for ( int x = 0; x < width; x++ )
+				{
+					if ( field[y][x] == d )                              // ячейка (x, y) помечена числом d
+					{
+						for ( int k = 0; k < 8; k++ )                    // проходим по всем непомеченным соседям
+						{
+							if (CheckWalkBounds(y + dy[k], x + dx[k]) == false)
+								continue;
+
+							if ( field[y + dy[k]][x + dx[k]] == FREE_SPACE )
+							{
+								stop = false;                            // найдены непомеченные клетки
+								field[y + dy[k]][x + dx[k]] = d + 1;     // распространяем волну
+							}
+						}
+					}
+				}
+			}
+
+			d++;
+		}
+
+		if (field[y_dst][x_dst] == FREE_SPACE) 
+			return false;			// путь не найден
+
+		// восстановление пути
+		int len = field[y_dst][x_dst];              // длина кратчайшего пути из (ax, ay) в (bx, by)
+		int x = x_dst;
+		int y = y_dst;
+		d = len;
+		std::cout << "distance: " << d << std::endl;
+		int last_k = -1;
+
+		while ( d > 0 )
+		{
+			Pos pos;
+			pos.x = x;
+			pos.y = y;
+			path.push_front(pos);
+
+			d--;
+			if( last_k >= 0 && 
+				CheckWalkBounds( y + dy[ last_k ], x + dx[ last_k ] ) &&
+				field[y + dy[last_k]][x + dx[last_k]] == d )
+			{
+				path.pop_front();
+				x += dx[ last_k ];
+				y += dy[ last_k ];
+				continue;
+			}
+
+			for (int k = 0; k < 8; k++)
+			{
+				if (CheckWalkBounds(y + dy[k], x + dx[k]) == false)
+					continue;
+
+				if (field[y + dy[k]][x + dx[k]] == d)
+				{
+					x = x + dx[k];
+					y = y + dy[k];           // переходим в ячейку, которая на 1 ближе к старту
+					last_k = k;
+					break;
+				}
+			}
+		}
+
+		for( int i = 0; i < height; ++i )
+			delete[] field[i];
+
+		delete[] field;
+
+		return true;
+	}
 
 	void ProcessMapPoints( const nav_msgs::OccupancyGrid::ConstPtr& msg )
 	{
+		objects.clear();
+		posCache.clear();
+
+		posCache.reserve( msg->info.height );
+		std::vector< int > temp( msg->info.width );
+
 		for( int i = 0; i < msg->data.size(); ++i )
 		{
-			// Если пусто либо неизвестно, то не обрабатываем
-			if (msg->data[i] < 0)
+			if ( i % msg->info.width == 0 )
+			{
+				memcpy( &temp[0], &msg->data[i], msg->info.width * sizeof( int ) );
+
+				posCache.push_back( temp );
+			}
+
+			// Если неизвестно, то не обрабатываем
+			if (msg->data[i] <= 0)
 				continue;
 
 			Pos pos;
 			pos.x = i % msg->info.width;
 			pos.y = i / msg->info.width;
-
-			if (msg->data[i] == 0)
-			{
-				std::set< Pos >::iterator it = posCache.find( pos );
-				if( it == posCache.end() )
-					continue;
-
-				posCache.erase( it );
-			}
-			else
-			{
-				if ( posCache.find( pos ) != posCache.end() )
-					continue;
-				
-				posCache.insert( pos );
-			}
 
 			if (objects.empty() && msg->data[i] > 0)
 			{
@@ -195,7 +348,7 @@ public:
 				}
 			}
 
-			if( distToClosestObject > MIN_DIST && msg->data[i] > 0 )
+			if( distToClosestObject > 1.5 * MIN_DIST && msg->data[i] > 0 )
 			{
 				objects.push_back( WorldObject( pos ) );
 			}
@@ -247,62 +400,28 @@ public:
 		target_pos.x = closest_pos.x - MIN_DIST * cos( atan2( closest_pos.y - robot_pose.y, closest_pos.x - robot_pose.x ) );
 		target_pos.y = closest_pos.y - MIN_DIST * sin( atan2( closest_pos.y - robot_pose.y, closest_pos.x - robot_pose.x ) );
 
-		Pos detour_pos;
-		if ( avoidObstacles(robot_pose, target_pos, detour_pos) )
-			pathPlan.push_back( detour_pos );
+		// avoid obstacles
+		std::deque< Pos > path;
+		FindPath( robot_pose, target_pos, path );
 
-		pathPlan.push_back( target_pos );
+		std::cout << "path plan: " << std::endl;
+		for( std::deque< Pos >::iterator it = path.begin(); it != path.end(); ++it )
+		{
+			std::cout << it->x << ", " << it->y << std::endl;
+			pathPlan.push_back( *it );
+		}
 
 		min_it->SetVisited();
 
 		PathPlanning( target_pos );
 	}
 
-	bool avoidObstacles( const Pos& robot_pos, const Pos& target_pos, Pos& detour_pos )
-	{
-		double k = ( target_pos.y - robot_pos.y ) * 1.0 / ( target_pos.x - robot_pos.x );
-		double c = robot_pos.y - k * robot_pos.x;
-		double alpha = atan( k );
-
-		double min_d = MIN_DIST;
-		std::set< Pos >::const_iterator min_it = posCache.begin();
-		for( std::set< Pos >::const_iterator it = posCache.begin(); it != posCache.end(); ++it )
-		{
-			if ( it->x < robot_pos.x || it->x > target_pos.x
-				 || it->y < robot_pos.y || it->y > target_pos.y )
-				continue;
-
-			double d = abs( it->y - k * it->x - c ) / pow( k, 2 );
-
-			if ( d < min_d )
-			{
-				min_d = d;
-				min_it = it;
-			}
-		}
-
-		if( min_d < MIN_DIST )
-		{
-			if ( min_it->y > ( k * min_it->x + c ) )
-			{
-				detour_pos.x = min_it->x + MIN_DIST * cos( alpha ); 
-				detour_pos.y = min_it->y - MIN_DIST * sin( alpha ); 
-			}
-			else
-			{
-				detour_pos.x = min_it->x - MIN_DIST * cos( alpha ); 
-				detour_pos.y = min_it->y + MIN_DIST * sin( alpha ); 
-			}
-
-			return true;
-		}
-
-		return false;
-	}
-
 	void mapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
 	{
 		pathPlan.clear();
+
+		this->height = msg->info.height;
+		this->width = msg->info.width;
 
 		// objects.clear();
 		this->ProcessMapPoints( msg );
