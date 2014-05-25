@@ -1,5 +1,7 @@
 #include <iostream>
+#include <fstream>
 #include <cmath>
+#include <cstdlib>
 #include <vector>
 #include <deque>
 #include <set>
@@ -141,6 +143,8 @@ private:
 	int height;
 
 	int width;
+		
+	int** field;
 public:
 
 	//! ROS node initialization
@@ -162,59 +166,20 @@ public:
 	// const Pos& robot_pos, const Pos& target_pos
 	bool FindPath(const Pos& robot_pos, const Pos& target_pos, std::deque< Pos >& path)
 	{
+		// the incoming and outcoming vector should be empty
+		if (!path.empty())
+			return false;
+
 		int x_src = robot_pos.x;
 		int y_src = robot_pos.y;
 		int x_dst = target_pos.x;
 		int y_dst = target_pos.y;
 
-		// the incoming and outcoming vector should be empty
-		if (!path.empty())
-			return false;
-
-		int** field = new int*[height];
-		for( int i = 0; i < height; ++i )
-			field[i] = new int[width];
-
-		for( int y = 0; y < height; y++ )
+		for ( int y = 0; y < height; y++ )
 		{
-			for( int x = 0; x < width; x++ )
+			for ( int x = 0; x < width; x++ )
 			{
-				field[y][x] = ( posCache[y][x] <= 0 ) ? FREE_SPACE : WALL;
-			}
-		}
-
-		// второй цикл для составления непроходимых участков учитывая размеры робота
-		for( int y = 0; y < height; y++ )
-		{
-			for( int x = 0; x < width; x++ )
-			{
-				if( field[y][x] == WALL )
-				{
-					for( int ty = -MIN_DIST; ty < MIN_DIST; ++ty )
-					{
-						for( int tx = -MIN_DIST; tx < MIN_DIST; ++tx )
-						{
-							if (CheckWalkBounds(y + ty, x + tx) == false)
-								continue;
-							
-							if( field[y + ty][x + tx] != WALL )
-								field[y + ty][x + tx] = UNREACHABLE;
-						}
-					}
-				}
-			}
-		}
-
-		// пометить точку назначения что до нее можно добраться
-		for( int ty = -MIN_DIST / 2; ty < MIN_DIST / 2; ++ty )
-		{
-			for( int tx = -MIN_DIST / 2; tx < MIN_DIST / 2; ++tx )
-			{
-				if (CheckWalkBounds(y_dst + ty, x_dst + tx) == false)
-					continue;
-
-				if( field[y_dst + ty][x_dst + tx] == UNREACHABLE )
-					field[y_dst + ty][x_dst + tx] = FREE_SPACE;
+				if(field[y][x] >= 0) field[y][x] = FREE_SPACE;
 			}
 		}
 
@@ -296,12 +261,44 @@ public:
 			}
 		}
 
-		for( int i = 0; i < height; ++i )
-			delete[] field[i];
-
-		delete[] field;
-
 		return true;
+	}
+
+	void FillFieldMap()
+	{
+		field = new int*[height];
+		for( int i = 0; i < height; ++i )
+			field[i] = new int[width];
+
+		for( int y = 0; y < height; y++ )
+		{
+			for( int x = 0; x < width; x++ )
+			{
+				field[y][x] = ( posCache[y][x] <= 0 ) ? FREE_SPACE : WALL;
+			}
+		}
+
+		// второй цикл для составления непроходимых участков учитывая размеры робота
+		for( int y = 0; y < height; y++ )
+		{
+			for( int x = 0; x < width; x++ )
+			{
+				if( field[y][x] == WALL )
+				{
+					for( int ty = -MIN_DIST; ty < MIN_DIST; ++ty )
+					{
+						for( int tx = -MIN_DIST; tx < MIN_DIST; ++tx )
+						{
+							if (CheckWalkBounds(y + ty, x + tx) == false)
+								continue;
+							
+							if( field[y + ty][x + tx] != WALL )
+								field[y + ty][x + tx] = UNREACHABLE;
+						}
+					}
+				}
+			}
+		}
 	}
 
 	void ProcessMapPoints( const nav_msgs::OccupancyGrid::ConstPtr& msg )
@@ -361,6 +358,35 @@ public:
 				closestIt->RemovePosition( pos );
 			}
 		}
+
+		FillFieldMap();
+	}
+
+	void PathPlanningSimple( const Pos & robot_pose )
+	{
+		std::string cfg_file(getenv("HOME"));
+		cfg_file.append( "/catkin_ws/src/turtlebot_program/robo.cfg" );
+		std::ifstream fin( cfg_file.c_str(), std::ios::ios_base::in );
+
+		Pos pos;
+		Pos pos_prev = robot_pose;
+		while(fin >> pos.x >> pos.y)
+		{
+			std::cout << "start: " << pos_prev.x << " " << pos_prev.y << "; target: " << pos.x << " " << pos.y << std::endl;
+
+			std::deque< Pos > path;
+			FindPath( pos_prev, pos, path );
+
+			std::cout << "path plan: " << std::endl;
+			for( std::deque< Pos >::iterator it = path.begin(); it != path.end(); ++it )
+			{
+				std::cout << it->x << ", " << it->y << std::endl;
+				pathPlan.push_back( *it );
+			}
+			pos_prev = pos;
+		}
+
+		fin.close();
 	}
 
 	void PathPlanning( const Pos & robot_pose )
@@ -377,7 +403,7 @@ public:
 			allVisited = false;
 
 			double cur_dist = it->GetDistToObj( robot_pose );
-			if ( cur_dist <= MIN_DIST )
+			if ( cur_dist <= 2 * MIN_DIST )
 			{
 				it->SetVisited();
 				continue;
@@ -397,8 +423,8 @@ public:
 
 		// calculate closest optimal point
 		Pos target_pos;
-		target_pos.x = closest_pos.x - MIN_DIST * cos( atan2( closest_pos.y - robot_pose.y, closest_pos.x - robot_pose.x ) );
-		target_pos.y = closest_pos.y - MIN_DIST * sin( atan2( closest_pos.y - robot_pose.y, closest_pos.x - robot_pose.x ) );
+		target_pos.x = closest_pos.x - 2 * MIN_DIST * cos( atan2( closest_pos.y - robot_pose.y, closest_pos.x - robot_pose.x ) );
+		target_pos.y = closest_pos.y - 2 * MIN_DIST * sin( atan2( closest_pos.y - robot_pose.y, closest_pos.x - robot_pose.x ) );
 
 		// avoid obstacles
 		std::deque< Pos > path;
@@ -427,13 +453,16 @@ public:
 		this->ProcessMapPoints( msg );
 	
 		std::cout << "New Map" << std::endl;
+
+		/*
 		int i = 0;
 		for ( std::vector< WorldObject >::const_iterator it = objects.begin(); it != objects.end(); ++it )
 		{
 			std::cout << "Object " << ++i << ( it->isVisited() ? " visited" : "" ) << std::endl;
-			// it->PrintObjectPositions();
+			it->PrintObjectPositions();
 			std::cout << std::endl;
 		}
+		*/
 
 		// estimate robot position
 		listener_.waitForTransform("map", "base_link", ros::Time(0), ros::Duration(1.0));
@@ -453,7 +482,7 @@ public:
 		std::cout << "Robot angle: " << tf::getYaw( transform.getRotation() ) * 180 / 2 / M_PI << std::endl;
 
 		// collect pathPlan vector
-		this->PathPlanning( robot_pose );
+		this->PathPlanningSimple( robot_pose );
 
 		// =========================================
 		// Move robot by plan
@@ -503,6 +532,12 @@ public:
 				base_cmd.angular.z = alpha;
 			}
 		}
+
+		// delete path field
+		for( int i = 0; i < height; ++i )
+			delete[] field[i];
+
+		delete[] field;
 	}
 };
 
